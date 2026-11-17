@@ -1,3 +1,12 @@
 -- Initial schema is applied idempotently by SQLAlchemy metadata.create_all.
--- Authoritative models: src/models/entities.py (relations, dependencies, reports,
--- audit_logs and users). Dependencies/report snapshots are persisted as MySQL JSON.
+-- Authoritative models: src/models/entities.py (relations, dependencies, references,
+-- settings, reports, audit_logs and users). Dependencies/reference/report snapshots
+-- are persisted as MySQL JSON.
+--
+-- v1.1 跨草案引用新增：
+--   references 表（source/target 草案、mapping、status、conflict_reason、
+--   applied_source_revision、committed_derived JSON）；
+--   settings 表（全局版本与引擎序列号的键值存储）；
+--   relations.revision 列（自有/派生有效内容的单调版本）。
+-- 全新库由 create_all 直接建立；已部署旧库需补建 references/settings 并为
+-- relations 增加 revision INTEGER NOT NULL DEFAULT 0（create_all 不会改既有表）。

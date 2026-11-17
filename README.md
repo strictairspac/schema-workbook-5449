@@ -6,7 +6,19 @@
 
 原先设计员在Excel里堆叠委托号、客户、检测项、方法与结果，再手工画表结构。痛点：依赖口径难确认、复合键容易漏判、拆表后无法证明无损。上游为委托单和已确认业务规则，本项目承接关系草案登记、函数依赖编辑、3NF合成、验证报告导出，下游为实验数据录入系统的数据库设计人员。
 
-核心实体：关系草案 Relation、函数依赖 Dependency、分解报告 Report。4业务页和独立登录页；管理员另有审计页。业务规则不执行为SQL，属性名是纯数据。
+核心实体：关系草案 Relation、函数依赖 Dependency、跨草案引用 Reference、分解报告 Report。5业务页和独立登录页；管理员另有审计页。业务规则不执行为SQL，属性名是纯数据。
+
+## 跨草案引用与规则复用
+
+多份委托草案复用同一套业务规则时，在「跨草案引用」页建立引用：选取源草案属性并逐条映射为目标草案属性（`源属性=目标属性`）。
+
+- **派生规则**：源 FD 按映射翻译为目标 FD；只登记被选取属性，**经未选属性传递得到的依赖自动保留**（如源 `A→B`、`B→C` 而 B 未选取，仍保留映射后的 `A→C`）。支持隐含空决定项（`∅→A` 常量依赖）。
+- **建立即拒绝**：多个源属性映射到同一目标属性（合并属性）、引用成环、引用自身、引用关系外属性，均返回 422 且不落库。
+- **三态与来源**：引用处于 `pending 待检查 / effective 已生效 / conflict 冲突`。派生规则与目标自有规则决定项相同但被决定项不同时标冲突并写明原因；每条规则附带推导来源（源规则映射 / 经未选属性传递 / 目标自有）。
+- **更正传播**：源自有规则更正后沿引用链拓扑更新，目标自有规则原样保留。传播是单事务：任一环节失败，引擎从备份恢复、数据库整体回滚，**整链保留旧版**；重试按 `(引用, 源版本)` 幂等，**绝不重复产生规则**。
+- **报告不混用**：受理瞬间冻结一个一致版本的有效依赖（自有 + 已提交派生）。更正与传播原子换版，因此每份报告只采用**全旧或全新**的有效依赖，快照不可变，后续更正不影响历史报告。
+- **并发**：引擎内建可重入锁；源更正与报告受理并发时，快照要么读到换版前要么换版后，不会半新半旧（见并发测试）。
+
 
 ## 快速启动
 
@@ -54,7 +66,18 @@ Python真算，MySQL保存草案/依赖与结果，Redis传递任务，独立wor
 |db|MySQL8.0|JSON属性与依赖、任务报告|
 |redis|Redis7|持久任务队列|
 
-目录：`frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}`；`backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}`；`backend/scripts/seed_demo.py`；`backend/migrations/001_initial.sql`。每核心实体贯穿模型/schema/service/route/API/store/page。组件table/badge/frame复用，hooks/session/feedback和utils/forms/html共用；request_id/errors双后端中间件。
+目录：`frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}`；`backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}`；`backend/scripts/seed_demo.py`；`backend/migrations/001_initial.sql`；测试在 `backend/tests/`。每核心实体贯穿模型/schema/service/route/API/store/page。组件table/badge/frame复用，hooks/session/feedback和utils/forms/html共用；request_id/errors双后端中间件。
+
+## 测试
+
+纯函数内核 `src/services/references.py`（闭包/映射/传递/成环/传播/快照）与持久化桥接 `src/services/reference_store.py` 分离，无网络与数据库依赖即可精确验证：
+
+```sh
+cd backend && python3 -m unittest discover -s tests -v
+```
+
+覆盖：菱形引用双路径落地、隐含空决定项、合并属性/成环/自引用拒绝、经未选属性传递保留、源更正沿三级链更新且目标自有规则不变、传播失败整链回滚、重试幂等不重复加规则、报告快照全旧或全新、源更正与报告受理并发不混用。本机未装第三方包时，`tests/_shims.py` 注入最小内存替身运行桥接/端到端测试；安装 `requirements.txt` 后垫片自动失效，走真实 SQLAlchemy/FastAPI。
+
 
 枚举：角色admin/operator/viewer、任务queued/running/completed/failed；前后端定义位于 `backend/src/constants/enums.py` 和 `frontend/src/constants/enums.js`，security/reports、frame/badge消费；worker持久化状态。
 

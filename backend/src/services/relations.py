@@ -1,10 +1,16 @@
 from sqlalchemy import select
 from fastapi import HTTPException
 from src.models.entities import Relation,Dependency
+from src.services import reference_store
 from src.utils.serialization import record
 from .common import save
 def listing(db): return [record(x) for x in db.scalars(select(Relation).order_by(Relation.id))]
-def create(db,data,user):return save(db,Relation(**data.model_dump()),user,'创建关系草案 '+data.code)
+def create(db,data,user):
+    obj=Relation(**data.model_dump())
+    result=save(db,obj,user,'创建关系草案 '+data.code)
+    # 登记进引用引擎（新草案尚无规则，版本为 0）
+    reference_store.get_engine(db).register_relation(obj.id)
+    return result
 def update(db,ident,data,user):
     obj=db.get(Relation,ident)
     if not obj:raise HTTPException(404,'关系不存在')
